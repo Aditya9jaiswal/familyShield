@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="colorPrimary">#3F51B5</color>
+    <color name="colorPrimaryDark">#303F9F</color>
+    <color name="colorAccent">#FF4081</color>
+
+
+    <!-- Add these -->
+    <color name="colorGreen">#4CAF50</color>
+    <color name="colorRed">#F44336</color>
+    <color name="colorYellow">#FFC107</color>
+    <color name="white">#FFFFFFFF</color>
+
+        <!-- Status Colors -->
+        <color name="status_online">#10B981</color>
+        <color name="status_offline">#94A3B8</color>
+        <color name="status_locked">#EF4444</color>
+        <color name="status_inactive">#6B7280</color>
+
+        <!-- Button Colors -->
+        <color name="btn_lock">#3B82F6</color>
+        <color name="btn_locate">#10B981</color>
+        <color name="btn_siren">#F59E0B</color>
+        <color name="btn_map">#8B5CF6</color>
+        <color name="btn_call">#EC4899</color>
+        <color name="btn_reset">#EF4444</color>
+        <color name="btn_complaint">#D32F2F</color>
+    <!-- Primary Colors -->
+    <color name="dark_blue">#1E3A8A</color>
+    <color name="purple">#7C3AED</color>
+    <color name="teal">#0D9488</color>
+    <color name="dark_gray">#374151</color>
+
+    <!-- Status Colors -->
+    <color name="online_green">#10B981</color>
+    <color name="offline_gray">#6B7280</color>
+    <color name="locked_orange">#F59E0B</color>
+    <color name="inactive_red">#EF4444</color>
+
+    <!-- Location Colors -->
+    <color name="location_blue">#2563EB</color>
+    <color name="location_card_bg">#EFF6FF</color>
+    <color name="time_gray">#6B7280</color>
+
+    <!-- Battery Colors -->
+    <color name="battery_high">#059669</color>
+    <color name="battery_medium">#D97706</color>
+    <color name="battery_low">#DC2626</color>
+
+
+
+</resources>

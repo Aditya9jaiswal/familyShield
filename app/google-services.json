@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "575978254342",
+    "project_id": "familyshield-c21f7",
+    "storage_bucket": "familyshield-c21f7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:575978254342:android:e177bb3c9657c90a8fd387",
+        "android_client_info": {
+          "package_name": "com.example.familyshield"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9NEC34qYM-9aHMJnwsl2TY5dXFLWOstE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/tvUserName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="User Device"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:padding="10dp"
+        android:textColor="@color/black"/>
+
+    <Button
+        android:id="@+id/btnLock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔒 Lock Device"
+        android:backgroundTint="#2196F3"
+        android:layout_marginTop="10dp"/>
+
+    <Button
+        android:id="@+id/btnWipe"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="⚠️ Factory Reset"
+        android:backgroundTint="#F44336"
+        android:layout_marginTop="10dp"/>
+
+    <Button
+        android:id="@+id/btnDisableReset"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🚫 Disable Factory Reset"
+        android:backgroundTint="#FF9800"
+        android:layout_marginTop="10dp"/>
+
+    <Button
+        android:id="@+id/btnEnableReset"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="✅ Enable Factory Reset"
+        android:backgroundTint="#4CAF50"
+        android:layout_marginTop="10dp"/>
+
+    <Button
+        android:id="@+id/btnLocate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📍 Locate Device"
+        android:backgroundTint="#9C27B0"
+        android:layout_marginTop="10dp"/>
+
+</LinearLayout>

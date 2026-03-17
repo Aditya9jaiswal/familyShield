@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scrollProfile"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/login2"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/tvProfileTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Admin Profile"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="@color/white"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- Name -->
+        <TextView
+            android:id="@+id/tvAdminName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Name: "
+            android:textSize="18sp"
+            android:textColor="@color/white"
+            android:padding="8dp"/>
+
+        <!-- Mobile -->
+        <TextView
+            android:id="@+id/tvAdminMobile"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Mobile: "
+            android:textSize="18sp"
+            android:textColor="@color/white"
+            android:padding="8dp"/>
+
+        <!-- Email -->
+        <TextView
+            android:id="@+id/tvAdminEmail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Email: "
+            android:textSize="18sp"
+            android:textColor="@color/white"
+            android:padding="8dp"/>
+
+        <!-- Role -->
+        <TextView
+            android:id="@+id/tvAdminRole"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Role: Admin"
+            android:textSize="18sp"
+            android:textColor="@color/white"
+            android:padding="8dp"/>
+
+        <!-- Created At -->
+        <TextView
+            android:id="@+id/tvAdminCreatedAt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Created: "
+            android:textSize="18sp"
+            android:textColor="@color/white"
+            android:padding="8dp"
+            android:layout_marginBottom="32dp"/>
+
+        <!-- Logout Button -->
+        <Button
+            android:id="@+id/btnLogout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Logout"
+            android:backgroundTint="@color/purple_500"
+            android:textColor="@android:color/white"
+            android:padding="12dp"
+            android:textAllCaps="false"/>
+
+    </LinearLayout>
+</ScrollView>
