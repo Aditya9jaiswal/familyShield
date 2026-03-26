@@ -1,41 +1,40 @@
 package com.example.familyshield.services
 
-import android.app.admin.DevicePolicyManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.os.UserManager
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.example.familyshield.R
-import com.example.familyshield.admin.MyDeviceAdminReceiver
 import com.example.familyshield.utils.DevicePolicyHelper
 import com.example.familyshield.utils.SessionManager
-import com.google.firebase.database.*
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ServerValue
+import com.google.firebase.database.ValueEventListener
 
 class CommandListenerService : Service() {
 
     private lateinit var database: DatabaseReference
     private lateinit var devicePolicyHelper: DevicePolicyHelper
     private lateinit var sessionManager: SessionManager
-    private lateinit var powerManager: PowerManager
     private lateinit var vibrator: Vibrator
-    private lateinit var dpm: DevicePolicyManager
-    private lateinit var adminComponent: ComponentName
     private var commandListener: ValueEventListener? = null
+    private var factoryResetListener: ValueEventListener? = null
     private var userMobile: String = ""
     private var adminMobile: String = ""
     private var wakeLock: PowerManager.WakeLock? = null
+    private var mediaPlayer: MediaPlayer? = null  // For siren
 
     companion object {
         private const val CHANNEL_ID = "command_channel"
@@ -46,11 +45,15 @@ class CommandListenerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-
         Log.d(TAG, "🚀 Service onCreate called")
 
         initializeServices()
-        checkUserSession()
+
+        if (!checkUserSession()) {
+            stopSelf()
+            return
+        }
+
         createNotificationChannel()
         startForegroundService()
         listenForCommands()
@@ -61,18 +64,16 @@ class CommandListenerService : Service() {
         sessionManager = SessionManager(this)
         devicePolicyHelper = DevicePolicyHelper(this)
         database = FirebaseDatabase.getInstance().reference
-        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        adminComponent = ComponentName(this, MyDeviceAdminReceiver::class.java)
 
-        // Acquire wake lock
+        // Acquire wake lock for critical operations
         try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 WAKE_LOCK_TAG
             ).apply {
-                acquire(10 * 60 * 1000L)
+                acquire(10 * 60 * 1000L) // 10 minutes timeout
             }
             Log.d(TAG, "✅ Wake lock acquired")
         } catch (e: Exception) {
@@ -80,17 +81,17 @@ class CommandListenerService : Service() {
         }
     }
 
-    private fun checkUserSession() {
+    private fun checkUserSession(): Boolean {
         userMobile = sessionManager.getUserMobile() ?: ""
         adminMobile = sessionManager.getParentAdminMobile() ?: ""
 
         if (userMobile.isEmpty() || adminMobile.isEmpty()) {
             Log.e(TAG, "❌ User not logged in properly")
-            stopSelf()
-            return
+            return false
         }
 
         Log.d(TAG, "✅ Service started for user: $userMobile, admin: $adminMobile")
+        return true
     }
 
     private fun createNotificationChannel() {
@@ -129,7 +130,7 @@ class CommandListenerService : Service() {
                 .build()
 
             startForeground(NOTIFICATION_ID, notification)
-            Log.d(TAG, "✅ Foreground service started with notification")
+            Log.d(TAG, "✅ Foreground service started")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Foreground start error: ${e.message}")
         }
@@ -144,114 +145,35 @@ class CommandListenerService : Service() {
             .child(userMobile)
             .child("factoryResetEnabled")
 
-        resetRef.addValueEventListener(object : ValueEventListener {
+        factoryResetListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val enabled = snapshot.getValue(Boolean::class.java) ?: true
 
                 if (!enabled) {
-                    // ✅ DISABLE FACTORY RESET - HIDE OPTION COMPLETELY
-                    disableFactoryResetCompletely()
-                    Log.d(TAG, "🚫 Factory reset DISABLED by admin - option hidden")
+                    // DISABLE FACTORY RESET - Use DevicePolicyHelper
+                    val success = devicePolicyHelper.disableFactoryReset()
+                    if (success) {
+                        Log.d(TAG, "🚫 Factory reset DISABLED by admin")
+                    } else {
+                        Log.e(TAG, "❌ Failed to disable factory reset")
+                    }
                 } else {
-                    // ✅ ENABLE FACTORY RESET - SHOW OPTION
-                    enableFactoryResetCompletely()
-                    Log.d(TAG, "✅ Factory reset ENABLED by admin - option visible")
+                    // ENABLE FACTORY RESET - Use DevicePolicyHelper
+                    val success = devicePolicyHelper.enableFactoryReset()
+                    if (success) {
+                        Log.d(TAG, "✅ Factory reset ENABLED by admin")
+                    } else {
+                        Log.e(TAG, "❌ Failed to enable factory reset")
+                    }
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
                 Log.e(TAG, "❌ Factory reset status error: ${error.message}")
             }
-        })
-    }
-
-    // ========== COMPLETE FACTORY RESET CONTROL ==========
-    private fun disableFactoryResetCompletely() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                // Method 1: User Restriction - Settings se factory reset option hide karo
-                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET)
-                Log.d(TAG, "✅ Factory reset option hidden from Settings")
-
-                // Method 2: Block remote reset (Android 11+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        val policy = android.app.admin.FactoryResetProtectionPolicy.Builder()
-                            .setFactoryResetProtectionEnabled(false)
-                            .build()
-                        dpm.setFactoryResetProtectionPolicy(adminComponent, policy)
-                        Log.d(TAG, "✅ Remote reset blocked")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "FRP not supported")
-                    }
-                }
-
-                // Method 3: Block Google FRP (Android 9+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    try {
-                        val restrictions = android.os.Bundle()
-                        restrictions.putBoolean("disable_factory_reset_protection_admin", true)
-                        dpm.setApplicationRestrictions(
-                            adminComponent,
-                            "com.google.android.gms",
-                            restrictions
-                        )
-                        sendBroadcast(Intent("com.google.android.gms.auth.FRP_CONFIG_CHANGED"))
-                        Log.d(TAG, "✅ Google FRP blocked")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Google FRP not supported")
-                    }
-                }
-            }
-        } catch (e: SecurityException) {
-            Log.e(TAG, "❌ Security error: ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Disable error: ${e.message}")
         }
-    }
 
-    private fun enableFactoryResetCompletely() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                // Method 1: Remove User Restriction - Settings mein factory reset option dikhao
-                dpm.clearUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET)
-                Log.d(TAG, "✅ Factory reset option visible in Settings")
-
-                // Method 2: Enable remote reset (Android 11+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        val policy = android.app.admin.FactoryResetProtectionPolicy.Builder()
-                            .setFactoryResetProtectionEnabled(true)
-                            .build()
-                        dpm.setFactoryResetProtectionPolicy(adminComponent, policy)
-                        Log.d(TAG, "✅ Remote reset enabled")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "FRP not supported")
-                    }
-                }
-
-                // Method 3: Enable Google FRP (Android 9+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    try {
-                        val restrictions = android.os.Bundle()
-                        restrictions.putBoolean("disable_factory_reset_protection_admin", false)
-                        dpm.setApplicationRestrictions(
-                            adminComponent,
-                            "com.google.android.gms",
-                            restrictions
-                        )
-                        sendBroadcast(Intent("com.google.android.gms.auth.FRP_CONFIG_CHANGED"))
-                        Log.d(TAG, "✅ Google FRP enabled")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Google FRP not supported")
-                    }
-                }
-            }
-        } catch (e: SecurityException) {
-            Log.e(TAG, "❌ Security error: ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Enable error: ${e.message}")
-        }
+        resetRef.addValueEventListener(factoryResetListener!!)
     }
 
     // ========== MAIN COMMAND LISTENER ==========
@@ -330,52 +252,76 @@ class CommandListenerService : Service() {
                     updateCommandStatus(commandRef, commandId, false, "Factory reset disabled by admin")
                 }
             }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to check factory reset status: ${e.message}")
+                updateCommandStatus(commandRef, commandId, false, "Error checking reset status")
+            }
     }
 
     private fun handleDisableResetCommand(commandRef: DatabaseReference, commandId: String) {
         Log.d(TAG, "🚫 Executing DISABLE RESET")
 
-        // Disable factory reset completely
-        disableFactoryResetCompletely()
+        // Disable factory reset using DevicePolicyHelper
+        val success = devicePolicyHelper.disableFactoryReset()
 
-        // Update Firebase
-        database.child("familyshield")
-            .child("admins")
-            .child(adminMobile)
-            .child("users")
-            .child(userMobile)
-            .child("factoryResetEnabled")
-            .setValue(false)
+        if (success) {
+            // Update Firebase only if device policy operation succeeded
+            database.child("familyshield")
+                .child("admins")
+                .child(adminMobile)
+                .child("users")
+                .child(userMobile)
+                .child("factoryResetEnabled")
+                .setValue(false)
+                .addOnSuccessListener {
+                    Log.d(TAG, "✅ Firebase updated: factoryResetEnabled = false")
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "❌ Failed to update Firebase: ${e.message}")
+                }
+        }
 
-        updateCommandStatus(commandRef, commandId, true, "🚫 Factory reset disabled")
+        val message = if (success) "🚫 Factory reset disabled" else "❌ Failed to disable factory reset"
+        updateCommandStatus(commandRef, commandId, success, message)
     }
 
     private fun handleEnableResetCommand(commandRef: DatabaseReference, commandId: String) {
         Log.d(TAG, "✅ Executing ENABLE RESET")
 
-        // Enable factory reset completely
-        enableFactoryResetCompletely()
+        // Enable factory reset using DevicePolicyHelper
+        val success = devicePolicyHelper.enableFactoryReset()
 
-        // Update Firebase
-        database.child("familyshield")
-            .child("admins")
-            .child(adminMobile)
-            .child("users")
-            .child(userMobile)
-            .child("factoryResetEnabled")
-            .setValue(true)
+        if (success) {
+            // Update Firebase only if device policy operation succeeded
+            database.child("familyshield")
+                .child("admins")
+                .child(adminMobile)
+                .child("users")
+                .child(userMobile)
+                .child("factoryResetEnabled")
+                .setValue(true)
+                .addOnSuccessListener {
+                    Log.d(TAG, "✅ Firebase updated: factoryResetEnabled = true")
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "❌ Failed to update Firebase: ${e.message}")
+                }
+        }
 
-        updateCommandStatus(commandRef, commandId, true, "✅ Factory reset enabled")
+        val message = if (success) "✅ Factory reset enabled" else "❌ Failed to enable factory reset"
+        updateCommandStatus(commandRef, commandId, success, message)
     }
 
     private fun handleLocateCommand(commandRef: DatabaseReference, commandId: String) {
         Log.d(TAG, "📍 Executing LOCATE")
         val intent = Intent(this, LocationService::class.java)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
+
         vibrate(200)
         updateCommandStatus(commandRef, commandId, true, "📍 Location request sent")
     }
@@ -405,6 +351,7 @@ class CommandListenerService : Service() {
             "result" to message,
             "executedAt" to ServerValue.TIMESTAMP
         )
+
         commandRef.updateChildren(updates)
             .addOnSuccessListener {
                 Log.d(TAG, "✅ Command $commandId status updated: $message")
@@ -414,6 +361,7 @@ class CommandListenerService : Service() {
             }
     }
 
+    // ========== VIBRATION METHODS ==========
     private fun vibrate(duration: Long) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -441,18 +389,56 @@ class CommandListenerService : Service() {
         }
     }
 
+    // ========== SIREN METHODS ==========
     private fun playSiren() {
         try {
-            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            val ringtone = RingtoneManager.getRingtone(this, notification)
-            ringtone.play()
+            // Stop any existing siren
+            stopSiren()
+
+            // Try to use alarm sound first
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+
+            mediaPlayer = MediaPlayer().apply {
+                setDataSource(this@CommandListenerService, alarmUri)
+                setLooping(true)
+                setVolume(1.0f, 1.0f)
+                prepare()
+                start()
+            }
+
+            Log.d(TAG, "🔊 Siren playing")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Siren error: ${e.message}")
+
+            // Fallback: Use notification sound
+            try {
+                val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(this@CommandListenerService, notificationUri)
+                    setLooping(true)
+                    prepare()
+                    start()
+                }
+                Log.d(TAG, "🔊 Fallback siren playing")
+            } catch (e2: Exception) {
+                Log.e(TAG, "❌ Fallback siren also failed: ${e2.message}")
+            }
         }
     }
 
     private fun stopSiren() {
-        // Implement if needed
+        try {
+            mediaPlayer?.apply {
+                if (isPlaying) {
+                    stop()
+                }
+                release()
+            }
+            mediaPlayer = null
+            Log.d(TAG, "🔇 Siren stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error stopping siren: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -466,7 +452,7 @@ class CommandListenerService : Service() {
         super.onDestroy()
         Log.d(TAG, "🛑 Service destroyed - will restart")
 
-        // Clean up
+        // Clean up Firebase listeners
         commandListener?.let {
             database.child("familyshield")
                 .child("admins")
@@ -477,11 +463,28 @@ class CommandListenerService : Service() {
                 .removeEventListener(it)
         }
 
-        wakeLock?.let {
-            if (it.isHeld) it.release()
+        factoryResetListener?.let {
+            database.child("familyshield")
+                .child("admins")
+                .child(adminMobile)
+                .child("users")
+                .child(userMobile)
+                .child("factoryResetEnabled")
+                .removeEventListener(it)
         }
 
-        // Restart
+        // Release wake lock
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.d(TAG, "✅ Wake lock released")
+            }
+        }
+
+        // Stop siren if playing
+        stopSiren()
+
+        // Restart service to maintain persistence
         val restartIntent = Intent(this, CommandListenerService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(restartIntent)
