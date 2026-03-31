@@ -1,0 +1,10 @@
+adb devices
+
+adb install -r C:\Users\adity_16erzjc\AndroidStudioProjects\Familyshield\app\build\outputs\apk\debug\app-debug.apk
+
+adb shell dpm set-active-admin com.example.familyshield/.admin.MyDeviceAdminReceiver
+
+
+adb shell dumpsys device_policy | grep "Device Owner"
+
+adb shell dpm get-device-owner
