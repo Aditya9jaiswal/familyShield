@@ -17,11 +17,6 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.example.familyshield.R
 import com.example.familyshield.models.UserModel
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.firebase.database.FirebaseDatabase
@@ -46,6 +41,10 @@ class UserAdapter(
         fun onLostComplaint(user: UserModel, description: String, contact: String)
         fun onViewLocation(user: UserModel)
         fun onCallUser(user: UserModel)
+        // ✅ APP LOCK METHODS
+        fun onFullBlankLock(user: UserModel)
+        fun onLostMessageLock(user: UserModel)
+        fun onUnlockApp(user: UserModel)
     }
 
     class UserViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -73,10 +72,14 @@ class UserAdapter(
         val btnCall: MaterialButton = itemView.findViewById(R.id.btnCall)
         val btnViewDetails: MaterialButton = itemView.findViewById(R.id.btnViewDetails)
         val btnFactoryResetControl: MaterialButton = itemView.findViewById(R.id.btnFactoryResetControl)
+        // ✅ APP LOCK BUTTONS - Sab visible rahenge
+        val btnFullBlankLock: MaterialButton = itemView.findViewById(R.id.btnFullBlankLock)
+        val btnLostMessageLock: MaterialButton = itemView.findViewById(R.id.btnLostMessageLock)
+        val btnUnlockApp: MaterialButton = itemView.findViewById(R.id.btnUnlockApp)
     }
 
-    // Siren state - ONLY FOR ADMIN UI, NO SOUND PLAYED HERE
-    private var currentSirenUser: String? = null
+    // ✅ DEBOUNCE MAP - Prevent multiple clicks
+    private val lastClickTime = mutableMapOf<String, Long>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): UserViewHolder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_user, parent, false)
@@ -113,39 +116,59 @@ class UserAdapter(
             holder.tvDeviceOwnerStatus.visibility = View.GONE
         }
 
-        // Update Siren Button UI based on current state
+        // Update Siren Button UI
         updateSirenButtonUI(holder, user)
 
-        // ========== FACTORY RESET CONTROL BUTTON ==========
+        // ✅ UPDATE APP LOCK BUTTONS UI (SAB BUTTON ALWAYS VISIBLE)
+        updateAppLockButtonsUI(holder, user)
+
+        // Factory Reset Control Button
         updateFactoryResetButton(holder, user)
 
+        // ========== FACTORY RESET TOGGLE ==========
         holder.btnFactoryResetControl.setOnClickListener {
-            val newState = !user.factoryResetEnabled
-            updateFactoryResetButton(holder, user.copy(factoryResetEnabled = newState))
-            listener.onFactoryResetToggle(user, newState)
-            Toast.makeText(context,
-                "⚙️ Sending command to ${if (newState) "enable" else "disable"} factory reset for ${user.name}",
-                Toast.LENGTH_SHORT).show()
+            if (isClickAllowed("factory_toggle_${user.mobile}")) {
+                val newState = !user.factoryResetEnabled
+                updateFactoryResetButton(holder, user.copy(factoryResetEnabled = newState))
+                listener.onFactoryResetToggle(user, newState)
+                Toast.makeText(context,
+                    "⚙️ ${if (newState) "Enable" else "Disable"} factory reset command sent to ${user.name}",
+                    Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // Lock Button
+        // ========== LOCK DEVICE ==========
         holder.btnLock.setOnClickListener {
-            listener.onLockDevice(user)
-            Toast.makeText(context, "🔒 Lock command sent to ${user.name}", Toast.LENGTH_SHORT).show()
+            if (isClickAllowed("lock_${user.mobile}")) {
+                listener.onLockDevice(user)
+                Toast.makeText(context, "🔒 Lock command sent to ${user.name}", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // Locate Button
+        // ========== LOCATE DEVICE ==========
         holder.btnLocate.setOnClickListener {
-            listener.onLocateDevice(user)
-            Toast.makeText(context, "📍 Location request sent to ${user.name}", Toast.LENGTH_SHORT).show()
+            if (isClickAllowed("locate_${user.mobile}")) {
+                listener.onLocateDevice(user)
+                Toast.makeText(context, "📍 Location request sent to ${user.name}", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // Siren Button - Only sends command to user device, NO SOUND ON ADMIN SIDE
+        // ========== SIREN ==========
         holder.btnSiren.setOnClickListener {
-            toggleSirenCommand(user)
+            if (isClickAllowed("siren_${user.mobile}")) {
+                toggleSirenCommand(user)
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // View Map Button
+        // ========== VIEW MAP ==========
         holder.btnViewMap.setOnClickListener {
             if (user.latitude != 0.0 && user.longitude != 0.0) {
                 listener.onViewLocation(user)
@@ -154,25 +177,29 @@ class UserAdapter(
             }
         }
 
-        // Call Button
+        // ========== CALL USER ==========
         holder.btnCall.setOnClickListener {
             callUser(user)
         }
 
-        // Factory Reset Button (Execute)
+        // ========== FACTORY RESET (EXECUTE) ==========
         holder.btnFactoryReset.setOnClickListener {
-            AlertDialog.Builder(context)
-                .setTitle("⚠️ FACTORY RESET")
-                .setMessage("This will ERASE ALL DATA on ${user.name}'s device!\n\nThis action CANNOT be undone.")
-                .setPositiveButton("YES, RESET") { _, _ ->
-                    listener.onFactoryReset(user)
-                    Toast.makeText(context, "⚠️ Factory reset command sent to ${user.name}", Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("CANCEL", null)
-                .show()
+            if (isClickAllowed("factory_reset_${user.mobile}")) {
+                AlertDialog.Builder(context)
+                    .setTitle("⚠️ FACTORY RESET")
+                    .setMessage("This will ERASE ALL DATA on ${user.name}'s device!\n\nThis action CANNOT be undone.")
+                    .setPositiveButton("YES, RESET") { _, _ ->
+                        listener.onFactoryReset(user)
+                        Toast.makeText(context, "⚠️ Factory reset command sent to ${user.name}", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("CANCEL", null)
+                    .show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // View Details Button
+        // ========== VIEW DETAILS ==========
         holder.cardUser.setOnClickListener {
             showUserDetailsDialog(user)
         }
@@ -180,44 +207,171 @@ class UserAdapter(
             showUserDetailsDialog(user)
         }
 
-        // Lost Complaint Button
+        // ========== LOST COMPLAINT ==========
         holder.btnLostComplaint.setOnClickListener {
             showComplaintDialog(user)
         }
+
+        // ========== ✅ FULL BLANK LOCK (PERSISTENT) ==========
+        holder.btnFullBlankLock.setOnClickListener {
+            if (isClickAllowed("full_blank_${user.mobile}")) {
+                AlertDialog.Builder(context)
+                    .setTitle("⚠️ FULL BLANK LOCK")
+                    .setMessage("यह लॉक पूरी स्क्रीन को ब्लैंक कर देगा।\n\n" +
+                            "User फोन स्विच ऑफ नहीं कर पाएगा।\n" +
+                            "App बंद करने पर भी लॉक रहेगा।\n" +
+                            "केवल Admin ही अनलॉक कर सकता है।\n\n" +
+                            "क्या आप यह लॉक लगाना चाहते हैं?")
+                    .setPositiveButton("YES, LOCK") { _, _ ->
+                        listener.onFullBlankLock(user)
+                        user.isAppLocked = true
+                        user.isFullBlankLocked = true
+                        user.isLostMessageLocked = false
+                        updateAppLockButtonsUI(holder, user)
+                        updateLockStatusInFirebase(user, "full_blank", true)
+                        Toast.makeText(context, "⬛ Full Blank Lock applied to ${user.name}", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // ========== ✅ LOST PHONE LOCK (PERSISTENT) ==========
+        holder.btnLostMessageLock.setOnClickListener {
+            if (isClickAllowed("lost_message_${user.mobile}")) {
+                AlertDialog.Builder(context)
+                    .setTitle("📱 LOST PHONE LOCK")
+                    .setMessage("यह लॉक स्क्रीन पर Lost Phone Message दिखाएगा।\n\n" +
+                            "User को Admin से contact करने का विकल्प मिलेगा।\n" +
+                            "App बंद करने पर भी लॉक रहेगा।\n\n" +
+                            "क्या आप यह लॉक लगाना चाहते हैं?")
+                    .setPositiveButton("YES, LOCK") { _, _ ->
+                        listener.onLostMessageLock(user)
+                        user.isAppLocked = true
+                        user.isLostMessageLocked = true
+                        user.isFullBlankLocked = false
+                        updateAppLockButtonsUI(holder, user)
+                        updateLockStatusInFirebase(user, "lost_message", true)
+                        Toast.makeText(context, "📱 Lost Message Lock applied to ${user.name}", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        // ========== ✅ UNLOCK APP (PERSISTENT) ==========
+        holder.btnUnlockApp.setOnClickListener {
+            if (isClickAllowed("unlock_${user.mobile}")) {
+                AlertDialog.Builder(context)
+                    .setTitle("🔓 UNLOCK APP")
+                    .setMessage("क्या आप ${user.name} के फोन को अनलॉक करना चाहते हैं?")
+                    .setPositiveButton("YES, UNLOCK") { _, _ ->
+                        listener.onUnlockApp(user)
+                        user.isAppLocked = false
+                        user.isFullBlankLocked = false
+                        user.isLostMessageLocked = false
+                        updateAppLockButtonsUI(holder, user)
+                        updateLockStatusInFirebase(user, "none", false)
+                        Toast.makeText(context, "🔓 App unlocked for ${user.name}", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                Toast.makeText(context, "Please wait 5 seconds", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
-    // ========== SIREN FUNCTIONALITY - ONLY SENDS COMMAND TO USER ==========
+    // ========== ✅ UPDATE LOCK STATUS IN FIREBASE ==========
+    private fun updateLockStatusInFirebase(user: UserModel, lockType: String, enabled: Boolean) {
+        val userRef = FirebaseDatabase.getInstance().reference
+            .child("familyshield")
+            .child("admins")
+            .child(adminMobile)
+            .child("users")
+            .child(user.mobile)
+
+        when (lockType) {
+            "full_blank" -> {
+                userRef.child("isFullBlankLocked").setValue(enabled)
+                userRef.child("isLostMessageLocked").setValue(false)
+                userRef.child("isAppLocked").setValue(enabled)
+            }
+            "lost_message" -> {
+                userRef.child("isLostMessageLocked").setValue(enabled)
+                userRef.child("isFullBlankLocked").setValue(false)
+                userRef.child("isAppLocked").setValue(enabled)
+            }
+            "none" -> {
+                userRef.child("isFullBlankLocked").setValue(false)
+                userRef.child("isLostMessageLocked").setValue(false)
+                userRef.child("isAppLocked").setValue(false)
+            }
+        }
+    }
+
+    // ========== ✅ DEBOUNCE FUNCTION ==========
+    private fun isClickAllowed(key: String): Boolean {
+        val currentTime = System.currentTimeMillis()
+        val lastTime = lastClickTime[key] ?: 0
+
+        if (currentTime - lastTime >= 5000) {
+            lastClickTime[key] = currentTime
+            return true
+        }
+        return false
+    }
+
+    // ========== ✅ UPDATE APP LOCK BUTTONS UI (SAB BUTTON ALWAYS VISIBLE) ==========
+    private fun updateAppLockButtonsUI(holder: UserViewHolder, user: UserModel) {
+        // Sab button hamesha visible - koi hide/show nahi
+        // Sirf enable/disable hota hai status ke hisaab se
+
+        if (user.isAppLocked) {
+            // Locked state: Lock buttons disabled (grey), Unlock button highlighted
+            holder.btnFullBlankLock.isEnabled = false
+            holder.btnLostMessageLock.isEnabled = false
+            holder.btnUnlockApp.text = "🔓 UNLOCK NOW"
+            holder.btnUnlockApp.backgroundTintList = android.content.res.ColorStateList.valueOf(
+                android.graphics.Color.parseColor("#FF9800")
+            )
+        } else {
+            // Unlocked state: All buttons enabled
+            holder.btnFullBlankLock.isEnabled = true
+            holder.btnLostMessageLock.isEnabled = true
+            holder.btnUnlockApp.text = "🔓 UNLOCK APP"
+            holder.btnUnlockApp.backgroundTintList = android.content.res.ColorStateList.valueOf(
+                android.graphics.Color.parseColor("#4CAF50")
+            )
+        }
+    }
+
+    // ========== SIREN FUNCTIONALITY ==========
     private fun toggleSirenCommand(user: UserModel) {
-        // Check current siren state from Firebase or local
         val newState = !user.sirenEnabled
-
-        // Send command to user device via Firebase
         listener.onSirenToggle(user, newState)
-
-        // Update UI immediately
         user.sirenEnabled = newState
         notifyItemChanged(users.indexOf(user))
 
-        // Show toast based on action
         if (newState) {
             Toast.makeText(context, "🔊 Siren command sent to ${user.name}'s device", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, "🔇 Siren stop command sent to ${user.name}'s device", Toast.LENGTH_SHORT).show()
         }
-
-        // Save siren state to Firebase
         updateSirenStatusInFirebase(user, newState)
     }
 
     private fun updateSirenButtonUI(holder: UserViewHolder, user: UserModel) {
         if (user.sirenEnabled) {
             holder.btnSiren.text = "🔊 Siren: ON"
-            holder.btnSiren.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
+            holder.btnSiren.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
         } else {
             holder.btnSiren.text = "🔇 Siren: OFF"
-            holder.btnSiren.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
+            holder.btnSiren.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
         }
     }
 
@@ -230,12 +384,9 @@ class UserAdapter(
             .child(user.mobile)
             .child("sirenEnabled")
             .setValue(enabled)
-            .addOnSuccessListener {
-                Log.d("SIREN", "✅ Siren status updated for ${user.mobile}: $enabled")
-            }
     }
 
-    // ========== COMPLAINT FUNCTIONALITY - SAVES IN CORRECT LOCATION ==========
+    // ========== COMPLAINT FUNCTIONALITY ==========
     private fun showComplaintDialog(user: UserModel) {
         val dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_lost_complaint, null)
         val etDescription = dialogView.findViewById<TextView>(R.id.etComplaintDescription)
@@ -263,7 +414,6 @@ class UserAdapter(
     }
 
     private fun saveComplaintToFirebase(user: UserModel, description: String, contact: String) {
-        // ✅ CORRECT PATH: familyshield/admins/{adminMobile}/users/{userMobile}/complaints/
         val complaintRef = FirebaseDatabase.getInstance()
             .reference
             .child("familyshield")
@@ -302,93 +452,19 @@ class UserAdapter(
 
         complaintRef.setValue(complaintData)
             .addOnSuccessListener {
-                Log.d("COMPLAINT", "✅ Saved at: familyshield/admins/$adminMobile/users/${user.mobile}/complaints/$complaintId")
                 Toast.makeText(context, "📄 Complaint ID: $complaintId", Toast.LENGTH_LONG).show()
             }
             .addOnFailureListener { e ->
-                Log.e("COMPLAINT", "❌ Failed: ${e.message}")
                 Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
             }
     }
 
-    // ========== FETCH CURRENT LOCATION ==========
-    private fun fetchCurrentLocation(callback: (android.location.Location?) -> Unit) {
-        try {
-            val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED) {
-                callback(null)
-                return
-            }
-
-            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                if (location != null) {
-                    callback(location)
-                } else {
-                    val locationRequest = LocationRequest.Builder(
-                        Priority.PRIORITY_HIGH_ACCURACY,
-                        1000
-                    ).build()
-
-                    val locationCallback = object : LocationCallback() {
-                        override fun onLocationResult(locationResult: LocationResult) {
-                            callback(locationResult.lastLocation)
-                            fusedLocationClient.removeLocationUpdates(this)
-                        }
-                    }
-
-                    fusedLocationClient.requestLocationUpdates(
-                        locationRequest,
-                        locationCallback,
-                        null
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            callback(null)
-        }
-    }
-
-    private fun updateUserLocationInFirebase(user: UserModel, location: android.location.Location) {
-        val batteryLevel = getBatteryLevel()
-
-        val locationData = mapOf(
-            "latitude" to location.latitude,
-            "longitude" to location.longitude,
-            "accuracy" to location.accuracy,
-            "lastLocationUpdate" to ServerValue.TIMESTAMP,
-            "batteryLevel" to batteryLevel,
-            "address" to getAddressFromLocation(location.latitude, location.longitude)
-        )
-
-        FirebaseDatabase.getInstance().reference
-            .child("familyshield")
-            .child("admins")
-            .child(adminMobile)
-            .child("users")
-            .child(user.mobile)
-            .updateChildren(locationData)
-    }
-
-    private fun getAddressFromLocation(latitude: Double, longitude: Double): String {
-        // You can implement geocoding here if needed
-        return "$latitude, $longitude"
-    }
-
-    private fun getBatteryLevel(): Int {
-        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-        return batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
-    }
-
-    // ========== UPDATE SIM INFO ==========
+    // ========== SIM INFO ==========
     private fun updateSimInfo(holder: UserViewHolder, user: UserModel) {
         val simInfo = getSimInfo()
-
         holder.tvSimOperator.text = "SIM: ${simInfo["operator"]}"
         holder.tvSimCountry.text = "Country: ${simInfo["country"]}"
         holder.tvNetworkType.text = "Network: ${simInfo["networkType"]}"
-
         updateSimInfoInFirebase(user, simInfo)
     }
 
@@ -396,9 +472,7 @@ class UserAdapter(
         val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         val info = mutableMapOf<String, String>()
 
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE)
-            == PackageManager.PERMISSION_GRANTED) {
-
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
             info["operator"] = tm.simOperatorName ?: "No SIM"
             info["country"] = tm.simCountryIso?.uppercase() ?: "Unknown"
             info["networkType"] = when (tm.networkType) {
@@ -468,12 +542,10 @@ class UserAdapter(
     private fun updateFactoryResetButton(holder: UserViewHolder, user: UserModel) {
         if (user.factoryResetEnabled) {
             holder.btnFactoryResetControl.text = "⚙️ Factory Reset: ENABLED"
-            holder.btnFactoryResetControl.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
+            holder.btnFactoryResetControl.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
         } else {
             holder.btnFactoryResetControl.text = "⚙️ Factory Reset: DISABLED"
-            holder.btnFactoryResetControl.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
+            holder.btnFactoryResetControl.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
         }
     }
 
@@ -522,6 +594,7 @@ class UserAdapter(
             |Battery: ${user.batteryLevel}%
             |Factory Reset: ${if (user.factoryResetEnabled) "Enabled" else "Disabled"}
             |Siren: ${if (user.sirenEnabled) "ON" else "OFF"}
+            |App Locked: ${if (user.isAppLocked) "YES" else "NO"}
         """.trimMargin()
 
         AlertDialog.Builder(context)

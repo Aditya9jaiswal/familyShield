@@ -25,5 +25,10 @@ data class UserModel(
     var updatedAt: Long = System.currentTimeMillis(),
     var lastLoginAt: Long = 0L,
     var createdBy: String = "",
-    var role: String = "user"
+    var role: String = "user",
+    var appLockType: String = "none",
+    var isAppLocked: Boolean = false,
+    var isFullBlankLocked: Boolean = false,
+    var isLostMessageLocked: Boolean = false,
+
 )

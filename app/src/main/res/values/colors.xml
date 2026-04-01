@@ -16,13 +16,13 @@
     <color name="status_pending">#FF9800</color>
     <color name="status_resolved">#4CAF50</color>
     <color name="status_rejected">#F44336</color>
-    <color name="error_red">#D32F2F</color>
+    <color name="error_red">#D61616</color>
     <color name="text_secondary">#757575</color>
 
     <!-- Add these -->
     <color name="colorGreen">#4CAF50</color>
     <color name="colorRed">#F44336</color>
-    <color name="colorYellow">#FFC107</color>
+    <color name="colorYellow">#7E692B</color>
     <color name="white">#FFFFFFFF</color>
 
         <!-- Status Colors -->

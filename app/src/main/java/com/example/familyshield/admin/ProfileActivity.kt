@@ -3,6 +3,7 @@ package com.example.familyshield.admin
 import android.content.Intent
 import android.os.Bundle
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -30,6 +31,7 @@ class ProfileActivity : AppCompatActivity() {
     private lateinit var btnLogout: MaterialButton
     private lateinit var layoutChangePassword: LinearLayout
     private lateinit var layoutTwoFactor: LinearLayout
+    private lateinit var progressBar: ProgressBar
 
     // Firebase
     private lateinit var database: DatabaseReference
@@ -48,7 +50,7 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun initViews() {
-        tvName = findViewById(R.id.tvAdminName)
+        tvName = findViewById(R.id.tvAdminNameValue)
         tvMobile = findViewById(R.id.tvAdminMobile)
         tvEmail = findViewById(R.id.tvAdminEmail)
         tvCreatedAt = findViewById(R.id.tvAdminCreatedAt)
@@ -58,6 +60,7 @@ class ProfileActivity : AppCompatActivity() {
         btnLogout = findViewById(R.id.btnLogout)
         layoutChangePassword = findViewById(R.id.layoutChangePassword)
         layoutTwoFactor = findViewById(R.id.layoutTwoFactor)
+        progressBar = findViewById(R.id.progressBar)
     }
 
     private fun initFirebase() {
@@ -82,29 +85,31 @@ class ProfileActivity : AppCompatActivity() {
 
         database.addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                // Get admin info from Firebase
-                val name = snapshot.child("name").getValue(String::class.java)
-                    ?: sessionManager.getAdminName() ?: "Admin User"
-                val mobile = snapshot.child("mobile").getValue(String::class.java) ?: adminMobile
-                val email = snapshot.child("email").getValue(String::class.java)
-                    ?: sessionManager.getAdminEmail() ?: "Not provided"
-                val createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L
+                try {
+                    val name = snapshot.child("name").getValue(String::class.java)
+                        ?: sessionManager.getUserName() ?: "Admin User"
+                    val mobile = snapshot.child("mobile").getValue(String::class.java) ?: adminMobile
+                    val email = snapshot.child("email").getValue(String::class.java)
+                        ?: sessionManager.getUserEmail() ?: "Not provided"
+                    val createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L
 
-                // Display formatted data
-                tvName.text = name
-                tvMobile.text = formatPhoneNumber(mobile)
-                tvEmail.text = email
-                tvCreatedAt.text = formatDate(createdAt)
+                    tvName.text = name
+                    tvMobile.text = formatPhoneNumber(mobile)
+                    tvEmail.text = email
+                    tvCreatedAt.text = formatDate(createdAt)
 
-                showLoading(false)
+                    showLoading(false)
+                } catch (e: Exception) {
+                    showLoading(false)
+                    Toast.makeText(this@ProfileActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
 
             override fun onCancelled(error: DatabaseError) {
                 showLoading(false)
-                // Fallback to session data
-                tvName.text = sessionManager.getAdminName() ?: "Admin User"
+                tvName.text = sessionManager.getUserName() ?: "Admin User"
                 tvMobile.text = formatPhoneNumber(adminMobile)
-                tvEmail.text = sessionManager.getAdminEmail() ?: "Not provided"
+                tvEmail.text = sessionManager.getUserEmail() ?: "Not provided"
                 tvCreatedAt.text = "Information unavailable"
 
                 Toast.makeText(
@@ -117,19 +122,24 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun loadStatistics() {
-        // Load total users count
-        database.child("users").addListenerForSingleValueEvent(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val userCount = snapshot.childrenCount
-                tvTotalUsers.text = userCount.toString()
-                loadComplaintsStatistics()
-            }
+        try {
+            database.child("users").addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val userCount = snapshot.childrenCount
+                    tvTotalUsers.text = userCount.toString()
+                    loadComplaintsStatistics()
+                }
 
-            override fun onCancelled(error: DatabaseError) {
-                tvTotalUsers.text = "0"
-                loadComplaintsStatistics()
-            }
-        })
+                override fun onCancelled(error: DatabaseError) {
+                    tvTotalUsers.text = "0"
+                    loadComplaintsStatistics()
+                }
+            })
+        } catch (e: Exception) {
+            tvTotalUsers.text = "0"
+            tvTotalComplaints.text = "0"
+            tvResolvedComplaints.text = "0"
+        }
     }
 
     private fun loadComplaintsStatistics() {
@@ -232,13 +242,16 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun updatePasswordInFirebase(newPassword: String) {
+        showLoading(true)
         val updates = mapOf("password" to newPassword)
 
         database.updateChildren(updates)
             .addOnSuccessListener {
+                showLoading(false)
                 Toast.makeText(this, "Password updated successfully", Toast.LENGTH_SHORT).show()
             }
             .addOnFailureListener { e ->
+                showLoading(false)
                 Toast.makeText(this, "Failed to update: ${e.message}", Toast.LENGTH_SHORT).show()
             }
     }
@@ -255,14 +268,12 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun enableTwoFactorAuth() {
-        // Show loading
         val dialog = MaterialAlertDialogBuilder(this)
             .setTitle("Setting up 2FA")
             .setMessage("Sending verification code...")
             .setCancelable(false)
             .show()
 
-        // Simulate 2FA setup (implement actual 2FA logic here)
         database.child("twoFactorEnabled").setValue(true)
             .addOnSuccessListener {
                 dialog.dismiss()
@@ -275,9 +286,7 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun showLoading(show: Boolean) {
-        // Optional: Add progress bar to your layout
-        val progressBar = findViewById<android.widget.ProgressBar>(R.id.progressBar)
-        progressBar?.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+        progressBar.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     private fun formatPhoneNumber(mobile: String): String {

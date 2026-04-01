@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="#F44336">
+
+    <!-- Lock Icon -->
+    <TextView
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:text="🔒"
+        android:textSize="48sp"
+        android:gravity="center"
+        android:background="@drawable/circle_white"
+        android:textColor="#F44336"
+        android:layout_marginBottom="24dp" />
+
+    <!-- ✅ Title - tvLostTitle -->
+    <TextView
+        android:id="@+id/tvLostTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔴 EMERGENCY LOCK"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/white"
+        android:gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <!-- ✅ Message - tvLostMessage -->
+    <TextView
+        android:id="@+id/tvLostMessage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="This device has been reported as lost by your admin."
+        android:textSize="16sp"
+        android:textColor="@android:color/white"
+        android:gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Second Message -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Please contact your admin immediately to unlock this device."
+        android:textSize="14sp"
+        android:textColor="#E0E0E0"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <!-- ✅ Admin Info - tvAdminInfo -->
+    <TextView
+        android:id="@+id/tvAdminInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Admin: +91 XXXXX XXXXX"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/white"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <!-- Buttons Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <!-- ✅ Call Admin Button - btnCallAdmin -->
+        <Button
+            android:id="@+id/btnCallAdmin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📞 CALL ADMIN"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:backgroundTint="#4CAF50"
+            android:textColor="@android:color/white"
+            android:padding="12dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:layout_marginEnd="8dp" />
+
+        <!-- ✅ OK Button - btnOk -->
+        <Button
+            android:id="@+id/btnOk"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="OK"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:backgroundTint="#2196F3"
+            android:textColor="@android:color/white"
+            android:padding="12dp"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

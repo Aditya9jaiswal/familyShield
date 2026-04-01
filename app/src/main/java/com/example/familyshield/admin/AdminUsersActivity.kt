@@ -2,7 +2,6 @@ package com.example.familyshield.admin
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.telephony.TelephonyManager
 import android.view.View
@@ -22,10 +21,6 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.ValueEventListener
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.UUID
 
 class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener {
 
@@ -38,9 +33,9 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
     private lateinit var usersList: MutableList<UserModel>
     private lateinit var adapter: UserAdapter
     private lateinit var sessionManager: SessionManager
+    private lateinit var commandSender: AdminCommandSender  // ✅ Now works
 
     private var adminMobile: String = ""
-    private lateinit var commandSender: AdminCommandSender
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,7 +56,7 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
             return
         }
 
-        commandSender = AdminCommandSender(adminMobile)
+        commandSender = AdminCommandSender(adminMobile)  // ✅ Now works
 
         // Setup RecyclerView
         usersList = mutableListOf()
@@ -114,6 +109,8 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
                             isLocked = userSnapshot.child("isLocked").getValue(Boolean::class.java) ?: false,
                             factoryResetEnabled = userSnapshot.child("factoryResetEnabled").getValue(Boolean::class.java) ?: true,
                             sirenEnabled = userSnapshot.child("sirenEnabled").getValue(Boolean::class.java) ?: false,
+                            isFullBlankLocked = userSnapshot.child("isFullBlankLocked").getValue(Boolean::class.java) ?: false,
+                            isLostMessageLocked = userSnapshot.child("isLostMessageLocked").getValue(Boolean::class.java) ?: false,
                             latitude = userSnapshot.child("latitude").getValue(Double::class.java) ?: 0.0,
                             longitude = userSnapshot.child("longitude").getValue(Double::class.java) ?: 0.0,
                             address = userSnapshot.child("address").getValue(String::class.java) ?: "",
@@ -165,6 +162,7 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
             commandSender.playSiren(user.mobile)
             Toast.makeText(this, "🔊 Siren ON for ${user.name}", Toast.LENGTH_SHORT).show()
         } else {
+            commandSender.stopSiren(user.mobile)
             Toast.makeText(this, "🔇 Siren OFF for ${user.name}", Toast.LENGTH_SHORT).show()
         }
     }
@@ -184,128 +182,78 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
         Toast.makeText(this, "⚠️ Factory reset command sent to ${user.name}", Toast.LENGTH_SHORT).show()
     }
 
-    // ========== ENHANCED LOST COMPLAINT - AUTO FETCH ALL INFO ==========
+    // ========== ✅ APP LOCK METHODS ==========
+    override fun onFullBlankLock(user: UserModel) {
+        commandSender.fullBlankLock(user.mobile)
+        Toast.makeText(this, "⬛ Full Blank Lock applied to ${user.name}", Toast.LENGTH_SHORT).show()
+        updateUserLockStatus(user.mobile, true, "full_blank")
+    }
+
+    override fun onLostMessageLock(user: UserModel) {
+        commandSender.lostMessageLock(user.mobile)
+        Toast.makeText(this, "📱 Lost Phone Lock applied to ${user.name}", Toast.LENGTH_SHORT).show()
+        updateUserLockStatus(user.mobile, true, "lost_message")
+    }
+
+    override fun onUnlockApp(user: UserModel) {
+        commandSender.unlockApp(user.mobile)
+        Toast.makeText(this, "🔓 App unlocked for ${user.name}", Toast.LENGTH_SHORT).show()
+        updateUserLockStatus(user.mobile, false, "none")
+    }
+
+    private fun updateUserLockStatus(userMobile: String, isLocked: Boolean, lockType: String) {
+        val userRef = FirebaseDatabase.getInstance().reference
+            .child("familyshield")
+            .child("admins")
+            .child(adminMobile)
+            .child("users")
+            .child(userMobile)
+
+        userRef.child("isAppLocked").setValue(isLocked)
+        userRef.child("appLockType").setValue(lockType)
+
+        when (lockType) {
+            "full_blank" -> {
+                userRef.child("isFullBlankLocked").setValue(true)
+                userRef.child("isLostMessageLocked").setValue(false)
+            }
+            "lost_message" -> {
+                userRef.child("isLostMessageLocked").setValue(true)
+                userRef.child("isFullBlankLocked").setValue(false)
+            }
+            "none" -> {
+                userRef.child("isFullBlankLocked").setValue(false)
+                userRef.child("isLostMessageLocked").setValue(false)
+            }
+        }
+    }
+
+    // ========== LOST COMPLAINT ==========
     override fun onLostComplaint(user: UserModel, description: String, contact: String) {
-        // Show loading
         val dialog = AlertDialog.Builder(this)
             .setTitle("📄 FILING COMPLAINT")
             .setMessage("Collecting device information...")
             .setCancelable(false)
             .show()
 
-        // Collect all information
-        val deviceInfo = getDeviceInfo(user)
         val simInfo = getSimInfo()
-        val currentTime = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+        val currentTime = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
 
-        // Create professional complaint
         val complaintText = """
-            |🔴 **LOST DEVICE COMPLAINT**
+            |🔴 LOST DEVICE COMPLAINT
             |═══════════════════════════════════════════
-            |
-            |📋 **COMPLAINT ID:** ${UUID.randomUUID().toString().substring(0, 8).uppercase()}
-            |📅 **DATE & TIME:** $currentTime
-            |
-            |═══════════════════════════════════════════
-            |👤 **USER DETAILS**
-            |═══════════════════════════════════════════
-            |▪️ **Name:** ${user.name}
-            |▪️ **Mobile:** ${user.mobile}
-            |▪️ **Email:** ${if (user.email.isNotEmpty()) user.email else "Not provided"}
-            |▪️ **User ID:** ${user.uid}
-            |▪️ **Registered On:** ${formatDate(user.createdAt)}
-            |
-            |═══════════════════════════════════════════
-            |📱 **DEVICE DETAILS**
-            |═══════════════════════════════════════════
-            |▪️ **Device Model:** ${user.deviceName}
-            |▪️ **Manufacturer:** ${Build.MANUFACTURER}
-            |▪️ **Brand:** ${Build.BRAND}
-            |▪️ **Device ID:** ${user.deviceId}
-            |▪️ **IMEI Number:** ${if (user.imei.isNotEmpty()) user.imei else "Not available"}
-            |▪️ **Android Version:** ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})
-            |▪️ **Hardware:** ${Build.HARDWARE}
-            |
-            |═══════════════════════════════════════════
-            |📲 **SIM INFORMATION**
-            |═══════════════════════════════════════════
-            |▪️ **SIM Operator:** ${simInfo["operator"]}
-            |▪️ **SIM Country:** ${simInfo["country"]}
-            |▪️ **SIM Serial:** ${simInfo["serial"]}
-            |▪️ **Phone Number:** ${simInfo["number"]}
-            |▪️ **Network Type:** ${simInfo["networkType"]}
-            |
-            |═══════════════════════════════════════════
-            |📍 **LAST KNOWN LOCATION**
-            |═══════════════════════════════════════════
-            |▪️ **Latitude:** ${user.latitude}
-            |▪️ **Longitude:** ${user.longitude}
-            |▪️ **Address:** ${if (user.address.isNotEmpty()) user.address else "Not available"}
-            |▪️ **Last Updated:** ${formatTime(user.lastLocationUpdate)}
-            |
-            |═══════════════════════════════════════════
-            |🔋 **DEVICE STATUS**
-            |═══════════════════════════════════════════
-            |▪️ **Battery Level:** ${user.batteryLevel}%
-            |▪️ **Online Status:** ${if (user.isOnline) "Online" else "Offline"}
-            |▪️ **Lock Status:** ${if (user.isLocked) "Locked" else "Unlocked"}
-            |▪️ **Factory Reset:** ${if (user.factoryResetEnabled) "Enabled" else "Disabled"}
-            |▪️ **Siren Status:** ${if (user.sirenEnabled) "Enabled" else "Disabled"}
-            |
-            |═══════════════════════════════════════════
-            |📡 **NETWORK INFORMATION**
-            |═══════════════════════════════════════════
-            |▪️ **WiFi Status:** ${deviceInfo["wifi"]}
-            |▪️ **Bluetooth:** ${deviceInfo["bluetooth"]}
-            |▪️ **Network:** ${deviceInfo["network"]}
-            |▪️ **IP Address:** ${deviceInfo["ip"]}
-            |
-            |═══════════════════════════════════════════
-            |👮 **COMPLAINT DETAILS**
-            |═══════════════════════════════════════════
-            |▪️ **Filed By Admin:** $adminMobile
-            |▪️ **Contact Number:** $contact
-            |▪️ **Description:**
-            |   $description
-            |
-            |═══════════════════════════════════════════
-            |✅ **COMPLAINT REGISTERED SUCCESSFULLY**
-            |🔍 Please keep this information for reference
-            |═══════════════════════════════════════════
+            |📅 DATE & TIME: $currentTime
+            |👤 USER: ${user.name} (${user.mobile})
+            |📱 DEVICE: ${user.deviceName}
+            |🔢 IMEI: ${user.imei}
+            |📍 LOCATION: ${user.latitude}, ${user.longitude}
+            |🔋 BATTERY: ${user.batteryLevel}%
+            |📝 DESCRIPTION: $description
+            |📞 CONTACT: $contact
         """.trimMargin()
 
         dialog.dismiss()
-
-        // Save to Firebase
-        saveComplaintToFirebase(user, complaintText, contact, deviceInfo, simInfo)
-    }
-
-    private fun getDeviceInfo(user: UserModel): Map<String, String> {
-        val wifiManager = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-        val bluetoothAdapter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-            android.bluetooth.BluetoothAdapter.getDefaultAdapter()
-        } else null
-
-        var ipAddress = "Unknown"
-        try {
-            val wifiInfo = wifiManager.connectionInfo
-            val ip = wifiInfo.ipAddress
-            ipAddress = String.format("%d.%d.%d.%d",
-                ip and 0xff,
-                ip shr 8 and 0xff,
-                ip shr 16 and 0xff,
-                ip shr 24 and 0xff
-            )
-        } catch (e: Exception) {
-            ipAddress = "Not available"
-        }
-
-        return mapOf(
-            "wifi" to (if (wifiManager.isWifiEnabled) "Enabled" else "Disabled"),
-            "bluetooth" to (if (bluetoothAdapter?.isEnabled == true) "Enabled" else "Disabled"),
-            "network" to (if (isNetworkAvailable()) "Connected" else "Disconnected"),
-            "ip" to ipAddress
-        )
+        saveComplaintToFirebase(user, complaintText, contact)
     }
 
     private fun getSimInfo(): Map<String, String> {
@@ -315,36 +263,14 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
         if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             info["operator"] = tm.simOperatorName ?: "Unknown"
             info["country"] = tm.simCountryIso ?: "Unknown"
-            info["serial"] = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                tm.simSerialNumber ?: "Not available"
-            } else {
-                "Not available"
-            }
-            info["number"] = tm.line1Number ?: "Not available"
-            info["networkType"] = when (tm.networkType) {
-                TelephonyManager.NETWORK_TYPE_LTE -> "4G LTE"
-                TelephonyManager.NETWORK_TYPE_UMTS -> "3G"
-                TelephonyManager.NETWORK_TYPE_EDGE -> "2G Edge"
-                TelephonyManager.NETWORK_TYPE_GPRS -> "2G GPRS"
-                else -> "Unknown"
-            }
         } else {
             info["operator"] = "Permission required"
             info["country"] = "Permission required"
-            info["serial"] = "Permission required"
-            info["number"] = "Permission required"
-            info["networkType"] = "Permission required"
         }
         return info
     }
 
-    private fun isNetworkAvailable(): Boolean {
-        val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val activeNetwork = cm.activeNetworkInfo
-        return activeNetwork != null && activeNetwork.isConnectedOrConnecting
-    }
-
-    private fun saveComplaintToFirebase(user: UserModel, complaintText: String, contact: String, deviceInfo: Map<String, String>, simInfo: Map<String, String>) {
+    private fun saveComplaintToFirebase(user: UserModel, complaintText: String, contact: String) {
         val complaintRef = FirebaseDatabase.getInstance()
             .reference
             .child("familyshield")
@@ -354,10 +280,9 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
             .child(user.mobile)
             .child("complaints")
             .push()
-        val complaintId = complaintRef.key ?: UUID.randomUUID().toString()
 
         val complaintData = mapOf(
-            "complaintId" to complaintId,
+            "complaintId" to (complaintRef.key ?: ""),
             "userId" to user.uid,
             "userMobile" to user.mobile,
             "userName" to user.name,
@@ -365,76 +290,20 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
             "description" to complaintText,
             "contactNumber" to contact,
             "adminMobile" to adminMobile,
-            "status" to "filed",
+            "status" to "pending",
             "filedAt" to ServerValue.TIMESTAMP,
-            "deviceId" to user.deviceId,
-            "deviceName" to user.deviceName,
-            "deviceModel" to Build.MODEL,
-            "deviceManufacturer" to Build.MANUFACTURER,
-            "androidVersion" to Build.VERSION.RELEASE,
-            "imei" to (user.imei ?: ""),
-            "simOperator" to simInfo["operator"],
-            "simCountry" to simInfo["country"],
-            "simSerial" to simInfo["serial"],
-            "phoneNumber" to simInfo["number"],
-            "networkType" to simInfo["networkType"],
             "lastLatitude" to user.latitude,
             "lastLongitude" to user.longitude,
-            "lastAddress" to user.address,
-            "lastLocationTime" to user.lastLocationUpdate,
-            "batteryLevel" to user.batteryLevel,
-            "isOnline" to user.isOnline,
-            "isLocked" to user.isLocked,
-            "factoryResetEnabled" to user.factoryResetEnabled,
-            "wifiStatus" to deviceInfo["wifi"],
-            "bluetoothStatus" to deviceInfo["bluetooth"],
-            "networkStatus" to deviceInfo["network"],
-            "ipAddress" to deviceInfo["ip"],
-            "complaintText" to complaintText
+            "batteryLevel" to user.batteryLevel
         )
 
         complaintRef.setValue(complaintData)
             .addOnSuccessListener {
-                showComplaintDetails(complaintText, complaintId)
+                Toast.makeText(this, "✅ Complaint filed!", Toast.LENGTH_SHORT).show()
             }
             .addOnFailureListener { e ->
-                Toast.makeText(this, "❌ Failed to save complaint: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "❌ Failed: ${e.message}", Toast.LENGTH_SHORT).show()
             }
-    }
-
-    private fun showComplaintDetails(complaintText: String, complaintId: String) {
-        val scrollView = androidx.core.widget.NestedScrollView(this)
-        val textView = TextView(this).apply {
-            text = complaintText
-            textSize = 12f
-            setPadding(24, 24, 24, 24)
-            setTextIsSelectable(true)
-        }
-        scrollView.addView(textView)
-
-        AlertDialog.Builder(this)
-            .setTitle("✅ COMPLAINT REGISTERED")
-            .setView(scrollView)
-            .setPositiveButton("OK") { _, _ -> }
-            .setNeutralButton("SHARE") { _, _ ->
-                shareComplaint(complaintText, complaintId)
-            }
-            .setNegativeButton("COPY") { _, _ ->
-                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText("Complaint", complaintText)
-                clipboard.setPrimaryClip(clip)
-                Toast.makeText(this, "📋 Copied to clipboard", Toast.LENGTH_SHORT).show()
-            }
-            .show()
-    }
-
-    private fun shareComplaint(complaintText: String, complaintId: String) {
-        val shareIntent = Intent().apply {
-            action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TEXT, "$complaintText\n\nComplaint ID: $complaintId\nFiled from FamilyShield App")
-            type = "text/plain"
-        }
-        startActivity(Intent.createChooser(shareIntent, "Share Complaint"))
     }
 
     override fun onViewLocation(user: UserModel) {
@@ -448,23 +317,5 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
 
     override fun onCallUser(user: UserModel) {
         startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${user.mobile}")))
-    }
-
-    private fun formatDate(timestamp: Long): String {
-        if (timestamp == 0L) return "Unknown"
-        return SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(timestamp))
-    }
-
-    private fun formatTime(timestamp: Long): String = when {
-        timestamp == 0L -> "Never"
-        else -> {
-            val diff = System.currentTimeMillis() - timestamp
-            when {
-                diff < 60000 -> "Just now"
-                diff < 3600000 -> "${diff / 60000} minutes ago"
-                diff < 86400000 -> "${diff / 3600000} hours ago"
-                else -> SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(timestamp))
-            }
-        }
     }
 }

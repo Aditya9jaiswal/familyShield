@@ -67,7 +67,7 @@ object AdminActionHelper {
     fun handleUserAction(
         context: Context,
         adminId: String,
-        user: UserModel,  // ✅ FIXED: UserModel, user nahi
+        user: UserModel,
         deviceId: String
     ) {
 

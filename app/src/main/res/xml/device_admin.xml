@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+        <uses-policies>
+            <force-lock />
+            <wipe-data />
+            <set-lock-task-features />   <!-- ✅ Lock Task ke liye -->
+        </uses-policies>
+    </device-admin>
+</PreferenceScreen>
