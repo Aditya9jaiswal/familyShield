@@ -348,9 +348,12 @@ class AdminUsersActivity : AppCompatActivity(), UserAdapter.OnUserActionListener
         val complaintRef = FirebaseDatabase.getInstance()
             .reference
             .child("familyshield")
+            .child("admins")
+            .child(adminMobile)
+            .child("users")
+            .child(user.mobile)
             .child("complaints")
             .push()
-
         val complaintId = complaintRef.key ?: UUID.randomUUID().toString()
 
         val complaintData = mapOf(

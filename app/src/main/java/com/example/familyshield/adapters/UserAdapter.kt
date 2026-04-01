@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.MediaPlayer
-import android.media.RingtoneManager
 import android.net.Uri
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -74,12 +72,10 @@ class UserAdapter(
         val btnViewMap: MaterialButton = itemView.findViewById(R.id.btnViewMap)
         val btnCall: MaterialButton = itemView.findViewById(R.id.btnCall)
         val btnViewDetails: MaterialButton = itemView.findViewById(R.id.btnViewDetails)
-        val btnFactoryResetControl: MaterialButton = itemView.findViewById(R.id.btnFactoryResetControl) // ✅ NEW BUTTON
+        val btnFactoryResetControl: MaterialButton = itemView.findViewById(R.id.btnFactoryResetControl)
     }
 
-    // Siren state
-    private var isSirenPlaying = false
-    private var mediaPlayer: MediaPlayer? = null
+    // Siren state - ONLY FOR ADMIN UI, NO SOUND PLAYED HERE
     private var currentSirenUser: String? = null
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): UserViewHolder {
@@ -117,27 +113,16 @@ class UserAdapter(
             holder.tvDeviceOwnerStatus.visibility = View.GONE
         }
 
+        // Update Siren Button UI based on current state
+        updateSirenButtonUI(holder, user)
+
         // ========== FACTORY RESET CONTROL BUTTON ==========
         updateFactoryResetButton(holder, user)
 
         holder.btnFactoryResetControl.setOnClickListener {
-            // Toggle state
             val newState = !user.factoryResetEnabled
-
-            // Update button text and color immediately for better UX
-            if (newState) {
-                holder.btnFactoryResetControl.text = "⚙️ Factory Reset: ENABLED"
-                holder.btnFactoryResetControl.backgroundTintList =
-                    android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
-            } else {
-                holder.btnFactoryResetControl.text = "⚙️ Factory Reset: DISABLED"
-                holder.btnFactoryResetControl.backgroundTintList =
-                    android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
-            }
-
-            // Send command to admin
+            updateFactoryResetButton(holder, user.copy(factoryResetEnabled = newState))
             listener.onFactoryResetToggle(user, newState)
-
             Toast.makeText(context,
                 "⚙️ Sending command to ${if (newState) "enable" else "disable"} factory reset for ${user.name}",
                 Toast.LENGTH_SHORT).show()
@@ -153,16 +138,11 @@ class UserAdapter(
         holder.btnLocate.setOnClickListener {
             listener.onLocateDevice(user)
             Toast.makeText(context, "📍 Location request sent to ${user.name}", Toast.LENGTH_SHORT).show()
-            fetchCurrentLocation { location ->
-                if (location != null) {
-                    updateUserLocationInFirebase(user, location)
-                }
-            }
         }
 
-        // Siren Button
+        // Siren Button - Only sends command to user device, NO SOUND ON ADMIN SIDE
         holder.btnSiren.setOnClickListener {
-            toggleSiren(user)
+            toggleSirenCommand(user)
         }
 
         // View Map Button
@@ -202,86 +182,42 @@ class UserAdapter(
 
         // Lost Complaint Button
         holder.btnLostComplaint.setOnClickListener {
-            showSimpleComplaintDialog(user)
+            showComplaintDialog(user)
         }
     }
 
-    // ========== HELPER FUNCTION FOR FACTORY RESET BUTTON ==========
-    private fun updateFactoryResetButton(holder: UserViewHolder, user: UserModel) {
-        if (user.factoryResetEnabled) {
-            holder.btnFactoryResetControl.text = "⚙️ Factory Reset: ENABLED"
-            holder.btnFactoryResetControl.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
+    // ========== SIREN FUNCTIONALITY - ONLY SENDS COMMAND TO USER ==========
+    private fun toggleSirenCommand(user: UserModel) {
+        // Check current siren state from Firebase or local
+        val newState = !user.sirenEnabled
+
+        // Send command to user device via Firebase
+        listener.onSirenToggle(user, newState)
+
+        // Update UI immediately
+        user.sirenEnabled = newState
+        notifyItemChanged(users.indexOf(user))
+
+        // Show toast based on action
+        if (newState) {
+            Toast.makeText(context, "🔊 Siren command sent to ${user.name}'s device", Toast.LENGTH_SHORT).show()
         } else {
-            holder.btnFactoryResetControl.text = "⚙️ Factory Reset: DISABLED"
-            holder.btnFactoryResetControl.backgroundTintList =
+            Toast.makeText(context, "🔇 Siren stop command sent to ${user.name}'s device", Toast.LENGTH_SHORT).show()
+        }
+
+        // Save siren state to Firebase
+        updateSirenStatusInFirebase(user, newState)
+    }
+
+    private fun updateSirenButtonUI(holder: UserViewHolder, user: UserModel) {
+        if (user.sirenEnabled) {
+            holder.btnSiren.text = "🔊 Siren: ON"
+            holder.btnSiren.backgroundTintList =
                 android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
-        }
-    }
-
-    // ========== PUBLIC METHOD TO UPDATE FROM FIREBASE ==========
-    fun updateFactoryResetStatus(userMobile: String, enabled: Boolean) {
-        val index = users.indexOfFirst { it.mobile == userMobile }
-        if (index != -1) {
-            users[index].factoryResetEnabled = enabled
-            notifyItemChanged(index)
-            Log.d("ADAPTER", "✅ Factory reset status updated for $userMobile: $enabled")
-        }
-    }
-
-    // ========== SIREN FUNCTIONALITY ==========
-    private fun toggleSiren(user: UserModel) {
-        if (isSirenPlaying && currentSirenUser == user.mobile) {
-            stopSiren()
-            listener.onSirenToggle(user, false)
-            Toast.makeText(context, "🔇 Siren stopped for ${user.name}", Toast.LENGTH_SHORT).show()
-            updateSirenStatusInFirebase(user, false)
         } else {
-            if (isSirenPlaying) {
-                stopSiren()
-            }
-            startSiren(user)
-            listener.onSirenToggle(user, true)
-            Toast.makeText(context, "🔊 Siren started for ${user.name}", Toast.LENGTH_SHORT).show()
-            updateSirenStatusInFirebase(user, true)
-        }
-    }
-
-    private fun startSiren(user: UserModel) {
-        try {
-            mediaPlayer?.release()
-
-            val resId = try {
-                R.raw.siren_sound
-            } catch (e: Exception) {
-                null
-            }
-
-            if (resId != null && resId != 0) {
-                mediaPlayer = MediaPlayer.create(context, resId)
-            } else {
-                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                mediaPlayer = MediaPlayer.create(context, alarmUri)
-            }
-
-            mediaPlayer?.isLooping = true
-            mediaPlayer?.start()
-            isSirenPlaying = true
-            currentSirenUser = user.mobile
-        } catch (e: Exception) {
-            Toast.makeText(context, "❌ Failed to play siren", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun stopSiren() {
-        try {
-            mediaPlayer?.stop()
-            mediaPlayer?.release()
-            mediaPlayer = null
-            isSirenPlaying = false
-            currentSirenUser = null
-        } catch (e: Exception) {
-            // Ignore
+            holder.btnSiren.text = "🔇 Siren: OFF"
+            holder.btnSiren.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
         }
     }
 
@@ -294,6 +230,85 @@ class UserAdapter(
             .child(user.mobile)
             .child("sirenEnabled")
             .setValue(enabled)
+            .addOnSuccessListener {
+                Log.d("SIREN", "✅ Siren status updated for ${user.mobile}: $enabled")
+            }
+    }
+
+    // ========== COMPLAINT FUNCTIONALITY - SAVES IN CORRECT LOCATION ==========
+    private fun showComplaintDialog(user: UserModel) {
+        val dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_lost_complaint, null)
+        val etDescription = dialogView.findViewById<TextView>(R.id.etComplaintDescription)
+        val etContact = dialogView.findViewById<TextView>(R.id.etContactNumber)
+
+        etContact.text = user.mobile
+
+        AlertDialog.Builder(context)
+            .setTitle("📄 FILE COMPLAINT")
+            .setView(dialogView)
+            .setPositiveButton("SUBMIT") { _, _ ->
+                val description = etDescription.text.toString()
+                val contact = etContact.text.toString()
+
+                if (description.isNotEmpty()) {
+                    saveComplaintToFirebase(user, description, contact)
+                    listener.onLostComplaint(user, description, contact)
+                    Toast.makeText(context, "✅ Complaint filed for ${user.name}", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Please enter description", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
+    private fun saveComplaintToFirebase(user: UserModel, description: String, contact: String) {
+        // ✅ CORRECT PATH: familyshield/admins/{adminMobile}/users/{userMobile}/complaints/
+        val complaintRef = FirebaseDatabase.getInstance()
+            .reference
+            .child("familyshield")
+            .child("admins")
+            .child(adminMobile)
+            .child("users")
+            .child(user.mobile)
+            .child("complaints")
+            .push()
+
+        val complaintId = complaintRef.key ?: ""
+        val currentTime = System.currentTimeMillis()
+
+        val complaintData = mapOf(
+            "complaintId" to complaintId,
+            "userId" to user.uid,
+            "userMobile" to user.mobile,
+            "userName" to user.name,
+            "userEmail" to user.email,
+            "description" to description,
+            "contactNumber" to contact,
+            "adminMobile" to adminMobile,
+            "status" to "pending",
+            "filedAt" to currentTime,
+            "filedAtTimestamp" to ServerValue.TIMESTAMP,
+            "deviceId" to user.deviceId,
+            "deviceName" to user.deviceName,
+            "phoneModel" to user.deviceName,
+            "imeiNumber" to user.deviceId,
+            "lastLatitude" to user.latitude,
+            "lastLongitude" to user.longitude,
+            "lastAddress" to user.address,
+            "batteryLevel" to user.batteryLevel,
+            "isRead" to false
+        )
+
+        complaintRef.setValue(complaintData)
+            .addOnSuccessListener {
+                Log.d("COMPLAINT", "✅ Saved at: familyshield/admins/$adminMobile/users/${user.mobile}/complaints/$complaintId")
+                Toast.makeText(context, "📄 Complaint ID: $complaintId", Toast.LENGTH_LONG).show()
+            }
+            .addOnFailureListener { e ->
+                Log.e("COMPLAINT", "❌ Failed: ${e.message}")
+                Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
     }
 
     // ========== FETCH CURRENT LOCATION ==========
@@ -343,7 +358,8 @@ class UserAdapter(
             "longitude" to location.longitude,
             "accuracy" to location.accuracy,
             "lastLocationUpdate" to ServerValue.TIMESTAMP,
-            "batteryLevel" to batteryLevel
+            "batteryLevel" to batteryLevel,
+            "address" to getAddressFromLocation(location.latitude, location.longitude)
         )
 
         FirebaseDatabase.getInstance().reference
@@ -353,6 +369,11 @@ class UserAdapter(
             .child("users")
             .child(user.mobile)
             .updateChildren(locationData)
+    }
+
+    private fun getAddressFromLocation(latitude: Double, longitude: Double): String {
+        // You can implement geocoding here if needed
+        return "$latitude, $longitude"
     }
 
     private fun getBatteryLevel(): Int {
@@ -443,7 +464,19 @@ class UserAdapter(
         }
     }
 
-    // ========== CALL USER ==========
+    // ========== HELPER FUNCTIONS ==========
+    private fun updateFactoryResetButton(holder: UserViewHolder, user: UserModel) {
+        if (user.factoryResetEnabled) {
+            holder.btnFactoryResetControl.text = "⚙️ Factory Reset: ENABLED"
+            holder.btnFactoryResetControl.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
+        } else {
+            holder.btnFactoryResetControl.text = "⚙️ Factory Reset: DISABLED"
+            holder.btnFactoryResetControl.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))
+        }
+    }
+
     private fun callUser(user: UserModel) {
         try {
             val number = if (user.mobile.startsWith("+91")) user.mobile else "+91${user.mobile}"
@@ -454,68 +487,6 @@ class UserAdapter(
         }
     }
 
-    // ========== SIMPLE COMPLAINT DIALOG ==========
-    private fun showSimpleComplaintDialog(user: UserModel) {
-        val dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_lost_complaint, null)
-        val etDescription = dialogView.findViewById<TextView>(R.id.etComplaintDescription)
-        val etContact = dialogView.findViewById<TextView>(R.id.etContactNumber)
-
-        etContact.text = user.mobile
-
-        AlertDialog.Builder(context)
-            .setTitle("📄 FILE COMPLAINT")
-            .setView(dialogView)
-            .setPositiveButton("SUBMIT") { _, _ ->
-                val description = etDescription.text.toString()
-                val contact = etContact.text.toString()
-
-                if (description.isNotEmpty()) {
-                    saveSimpleComplaintToFirebase(user, description, contact)
-                    listener.onLostComplaint(user, description, contact)
-                    Toast.makeText(context, "✅ Complaint filed for ${user.name}", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Please enter description", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("CANCEL", null)
-            .show()
-    }
-
-    private fun saveSimpleComplaintToFirebase(user: UserModel, description: String, contact: String) {
-        val complaintRef = FirebaseDatabase.getInstance()
-            .reference
-            .child("familyshield")
-            .child("complaints")
-            .push()
-
-        val complaintId = complaintRef.key ?: ""
-
-        val complaintData = mapOf(
-            "complaintId" to complaintId,
-            "userId" to user.uid,
-            "userMobile" to user.mobile,
-            "userName" to user.name,
-            "userEmail" to user.email,
-            "description" to description,
-            "contactNumber" to contact,
-            "adminMobile" to adminMobile,
-            "status" to "filed",
-            "filedAt" to ServerValue.TIMESTAMP,
-            "deviceId" to user.deviceId,
-            "deviceName" to user.deviceName,
-            "lastLatitude" to user.latitude,
-            "lastLongitude" to user.longitude,
-            "lastAddress" to user.address,
-            "batteryLevel" to user.batteryLevel
-        )
-
-        complaintRef.setValue(complaintData)
-            .addOnSuccessListener {
-                Toast.makeText(context, "📄 Complaint ID: $complaintId", Toast.LENGTH_LONG).show()
-            }
-    }
-
-    // ========== USER DETAILS DIALOG ==========
     private fun showUserDetailsDialog(user: UserModel) {
         val simInfo = getSimInfo()
         val details = """
@@ -550,6 +521,7 @@ class UserAdapter(
             |Locked: ${if (user.isLocked) "Yes" else "No"}
             |Battery: ${user.batteryLevel}%
             |Factory Reset: ${if (user.factoryResetEnabled) "Enabled" else "Disabled"}
+            |Siren: ${if (user.sirenEnabled) "ON" else "OFF"}
         """.trimMargin()
 
         AlertDialog.Builder(context)
@@ -586,5 +558,14 @@ class UserAdapter(
         users.clear()
         users.addAll(newUsers)
         notifyDataSetChanged()
+    }
+
+    fun updateSirenStatus(userMobile: String, enabled: Boolean) {
+        val index = users.indexOfFirst { it.mobile == userMobile }
+        if (index != -1) {
+            users[index].sirenEnabled = enabled
+            notifyItemChanged(index)
+            Log.d("ADAPTER", "✅ Siren status updated for $userMobile: $enabled")
+        }
     }
 }
